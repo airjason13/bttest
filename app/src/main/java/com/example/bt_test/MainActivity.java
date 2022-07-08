@@ -26,6 +26,9 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Message;
+import android.os.Parcel;
+import android.os.ParcelUuid;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -33,9 +36,14 @@ import android.widget.CompoundButton;
 import android.widget.ToggleButton;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
@@ -52,15 +60,21 @@ public class MainActivity extends AppCompatActivity {
 
     Set<BluetoothDevice> bondDevices;
     Set<BluetoothDevice> remoteDevices;
-    private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    //private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    //private static final UUID MY_UUID = UUID.fromString("0000111e-0000-1000-8000-00805f9b34fb"); //HFP hands free profile
+    private static final UUID MY_UUID = UUID.fromString("00000001-0000-1000-8000-00805F9B34FB");
     private BluetoothSocket mmSocket;
     private BluetoothDevice mmDevice;
-
+    ConnectThread connectThread;
     private final static int REQUEST_ENABLE_BT = 1;
     private static final int PERMISSION_REQUEST_COARSE_LOCATION = 1;
     private static final int PERMISSION_REQUEST_FINE_LOCATION = 10000;
     private static final int PERMISSION_REQUEST_BACKGROUND_LOCATION = 100;
     private static final int PERMISSION_REQUEST_ADVERTISE = 1000;
+    private static final int PERMISSION_REQUEST_CONNECT = 1001;
+    private InputStream is = null;
+    private OutputStream os = null;
+    ServeThread serveThread = null;
     UUID uuid;
     @RequiresApi(api = Build.VERSION_CODES.M)
     @Override
@@ -121,6 +135,20 @@ public class MainActivity extends AppCompatActivity {
             });
             builder.show();
         }
+
+        if (this.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            final AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("This app needs location access");
+            builder.setMessage("Please grant location access so this app can detect peripherals.");
+            builder.setPositiveButton(android.R.string.ok, null);
+            builder.setOnDismissListener(new DialogInterface.OnDismissListener() {
+                @Override
+                public void onDismiss(DialogInterface dialog) {
+                    requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, PERMISSION_REQUEST_CONNECT);
+                }
+            });
+            builder.show();
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (this.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, PERMISSION_REQUEST_COARSE_LOCATION);
@@ -172,10 +200,14 @@ public class MainActivity extends AppCompatActivity {
                                                  for (BluetoothDevice device : bondDevices) {
                                                      String deviceName = device.getName();
                                                      String deviceHardwareAddress = device.getAddress(); // MAC address
-                                                     Log.i(TAG, "deviceName : " + deviceName);
-                                                     if(deviceName.contains("raspberry")){
-                                                         deviceaddress = deviceHardwareAddress;
+                                                     if(deviceName.contains("rasp")) {
+                                                         ParcelUuid uuids[] = device.getUuids();
+                                                         Log.i(TAG, "uuids :" + Arrays.toString(uuids));
+                                                         Log.i(TAG, "deviceName : " + deviceName);
+                                                         connectThread = new ConnectThread(device);
+                                                         connectThread.start();
                                                      }
+
                                                  }
                                              }else {
                                                  Log.i(TAG, "no Bond devices" );
@@ -209,6 +241,8 @@ public class MainActivity extends AppCompatActivity {
 
         //mBluetoothAdapter.startDiscovery();
         //enable_discovery();
+        //serveThread = new ServeThread();
+        //serveThread.start();
 
     }
 
@@ -217,7 +251,7 @@ public class MainActivity extends AppCompatActivity {
 
         //The second parameter can be set from 0 to 3600 seconds, which can be found in this time interval (window period)
         //Any value not in this range will be automatically set to 120 seconds.
-        discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 1200);
+        discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 3600);
 
         startActivity(discoverableIntent);
     }
@@ -244,7 +278,7 @@ public class MainActivity extends AppCompatActivity {
     private final BroadcastReceiver searchReceiver = new BroadcastReceiver() {
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-            Log.i(TAG, "get intent, action :" + action);
+
             if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                 // Discovery has found a device. Get the BluetoothDevice
                 // object and its info from the Intent.
@@ -258,8 +292,13 @@ public class MainActivity extends AppCompatActivity {
                 Log.i(TAG, "deviceName :" + deviceName);
                 if(deviceName.contains("rasp")){
                     //mbtDevice = device;
-                    ConnectThread connectThread = new ConnectThread(device);
+                    ParcelUuid uuids[] =device.getUuids();
+
+                    pairDevice(device);
+                    Log.i(TAG, "uuids :" + Arrays.toString(uuids));
+                    connectThread = new ConnectThread(device);
                     connectThread.start();
+
                 }
 
             }else if(BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)){
@@ -285,15 +324,18 @@ public class MainActivity extends AppCompatActivity {
             // because mmSocket is final.
             BluetoothSocket tmp = null;
             mmDevice = device;
-
+            BluetoothSocket socket = null;
             try {
                 // Get a BluetoothSocket to connect with the given BluetoothDevice.
                 // MY_UUID is the app's UUID string, also used in the server code.
-                tmp = device.createRfcommSocketToServiceRecord(MY_UUID);
+
+                socket = device.createRfcommSocketToServiceRecord(MY_UUID);
+                //tmp = device.createRfcommSocketToServiceRecord(MY_UUID);
+
             } catch (IOException e) {
                 Log.e(TAG, "Socket's create() method failed", e);
             }
-            mmSocket = tmp;
+            mmSocket = socket;
         }
 
         public void run() {
@@ -304,6 +346,7 @@ public class MainActivity extends AppCompatActivity {
                 // Connect to the remote device through the socket. This call blocks
                 // until it succeeds or throws an exception.
                 mmSocket.connect();
+
             } catch (IOException connectException) {
                 // Unable to connect; close the socket and return.
                 Log.i(TAG,"connect fail");
@@ -314,7 +357,18 @@ public class MainActivity extends AppCompatActivity {
                 }
                 return;
             }
-
+            Log.i(TAG,"CONNECT OK!");
+            try {
+                is = mmSocket.getInputStream();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            try {
+                os = mmSocket.getOutputStream();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            send("hello");
             // The connection attempt succeeded. Perform work associated with
             // the connection in a separate thread.
             //manageMyConnectedSocket(mmSocket);
@@ -330,11 +384,121 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void pairDevice(BluetoothDevice device) {
+
+        try {
+
+            Method method = device.getClass().getMethod("createBond", (Class[]) null);
+
+            method.invoke(device, (Object[]) null);
+
+        } catch (Exception e) {
+
+            e.printStackTrace();
+
+        }
+
+    }
+
+    public void send(final String tmp){
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                if (os!=null) {
+                    try {
+                        os.write(tmp.getBytes("utf-8"));
+                        os.flush();
+
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        Log.d(TAG,"send IOE");
+                    }
+                    Log.i(TAG,"send ok!");
+                }else{
+                    Log.i(TAG," os = null");
+                }
+
+            }
+        }).start();
+    }
+
+    public class ServeThread extends Thread {
+
+        private BluetoothServerSocket serverSocket;
+
+        private BluetoothSocket serveSocket = null;
+        int which = 1;
+
+        public ServeThread() {
+            try {
+
+                serverSocket = mBluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord("name",
+                        UUID.fromString("0000111e-0000-1000-8000-00805f9b34fb"));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        @Override
+        public void run() {
+            // TODO Auto-generated method stub
+            try {
+                Log.d(TAG, "ServeThread create");
+                serveSocket = serverSocket.accept();
+                serverSocket.close();
+                which = 0;
+                is = serveSocket.getInputStream();
+                os = serveSocket.getOutputStream();
+
+                ReadThread readThread = new ReadThread(serveSocket);
+                readThread.start();
+
+                send("從serve端發送成功");
+
+            } catch (IOException e) {
+                // TODO Auto-generated catch block
+                Log.d("ServeThread","create error");
+                e.printStackTrace();
+            }
+
+
+        }
+    }
+
+    public class ReadThread extends Thread{
+
+        public BluetoothSocket socket;
+        public ReadThread(BluetoothSocket socket){
+            this.socket = socket;
+        }
+
+        @Override
+        public void run() {
+            while (socket.isConnected()) {
+                byte[] buffer = new byte[128];
+                int count = 0;
+                if (socket != null) {
+                    try {
+                        String tmp;
+                        count = is.read(buffer);
+                        tmp = new String(buffer, 0, count, "utf-8");
+                        Message message = new Message();
+                        message.arg1 = 1;
+                        message.obj = tmp;
+                        //handler.sendMessage(message);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        Log.d(TAG, "ReadThread IOE");
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     @Override
     protected void onResume() {
         Log.i(TAG,"onResume");
-        mBluetoothAdapter.startDiscovery();
+        //mBluetoothAdapter.startDiscovery();
 
         super.onResume();
     }
@@ -343,13 +507,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
 
-
         // Don't forget to unregister the ACTION_FOUND receiver.
         unregisterReceiver(searchReceiver);
     }
-
-
-
-
 
 }
