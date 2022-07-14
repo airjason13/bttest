@@ -7,16 +7,10 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
-import android.bluetooth.BluetoothGattCallback;
-import android.bluetooth.BluetoothGattCharacteristic;
-import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothManager;
-import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.bluetooth.le.BluetoothLeScanner;
-import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanResult;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -25,26 +19,23 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.Message;
-import android.os.Parcel;
-import android.os.ParcelUuid;
 import android.util.Log;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CompoundButton;
+import android.widget.EditText;
+import android.widget.ListView;
 import android.widget.ToggleButton;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
-import java.util.Arrays;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.Set;
 import java.util.UUID;
 
 public class MainActivity extends AppCompatActivity {
@@ -52,20 +43,24 @@ public class MainActivity extends AppCompatActivity {
     BluetoothDevice mbtDevice;
     BluetoothAdapter mBluetoothAdapter;
     BluetoothLeScanner bluetoothlescanner;
-    private final Map<String, BluetoothDevice> devices = new HashMap<>();
-    String deviceaddress;
+    //private final Map<String, BluetoothDevice> devices = new HashMap<>();
+    //String deviceaddress;
     BluetoothGatt mBluetoothGatt;
     public Button searchBtn;//搜尋藍芽裝置
     public ToggleButton openBtn;//啟動藍芽裝置
 
-    Set<BluetoothDevice> bondDevices;
-    Set<BluetoothDevice> remoteDevices;
+    List<BluetoothDevice> searchedDevices= new ArrayList<BluetoothDevice>();
+
     //private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     //private static final UUID MY_UUID = UUID.fromString("0000111e-0000-1000-8000-00805f9b34fb"); //HFP hands free profile
     private static final UUID MY_UUID = UUID.fromString("00000001-0000-1000-8000-00805F9B34FB");
     private BluetoothSocket mmSocket;
     private BluetoothDevice mmDevice;
     ConnectThread connectThread;
+    //TextView peripheralTextView;
+    private ArrayAdapter<String> mAdapter;
+    EditText ssidEdittext;
+    EditText pwdEdittext;
     private final static int REQUEST_ENABLE_BT = 1;
     private static final int PERMISSION_REQUEST_COARSE_LOCATION = 1;
     private static final int PERMISSION_REQUEST_FINE_LOCATION = 10000;
@@ -95,7 +90,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
             builder.show();
-        }
+        }//ok to mark
         if (this.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             final AlertDialog.Builder builder = new AlertDialog.Builder(this);
             builder.setTitle("This app needs location access");
@@ -108,11 +103,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
             builder.show();
-        }
+        }//ok to mark
         if (this.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             final AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("This app needs location access");
-            builder.setMessage("Please grant location access so this app can detect peripherals.");
+            builder.setTitle("This app needs ACCESS_BACKGROUND_LOCATION access");
+            builder.setMessage("Please grant ACCESS_BACKGROUND_LOCATION access so this app can detect peripherals.");
             builder.setPositiveButton(android.R.string.ok, null);
             builder.setOnDismissListener(new DialogInterface.OnDismissListener() {
                 @Override
@@ -124,8 +119,8 @@ public class MainActivity extends AppCompatActivity {
         }
         if (this.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
             final AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("This app needs location access");
-            builder.setMessage("Please grant location access so this app can detect peripherals.");
+            builder.setTitle("This app needs BLUETOOTH_ADVERTISE access");
+            builder.setMessage("Please grant BLUETOOTH_ADVERTISE access so this app can detect peripherals.");
             builder.setPositiveButton(android.R.string.ok, null);
             builder.setOnDismissListener(new DialogInterface.OnDismissListener() {
                 @Override
@@ -138,8 +133,8 @@ public class MainActivity extends AppCompatActivity {
 
         if (this.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             final AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("This app needs location access");
-            builder.setMessage("Please grant location access so this app can detect peripherals.");
+            builder.setTitle("This app needs BLUETOOTH_CONNECT access");
+            builder.setMessage("Please grant BLUETOOTH_CONNECT access so this app can detect peripherals.");
             builder.setPositiveButton(android.R.string.ok, null);
             builder.setOnDismissListener(new DialogInterface.OnDismissListener() {
                 @Override
@@ -154,6 +149,30 @@ public class MainActivity extends AppCompatActivity {
                 requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION}, PERMISSION_REQUEST_COARSE_LOCATION);
             }
         }
+
+        ssidEdittext = (EditText)findViewById(R.id.SSIDeditTextText);
+        pwdEdittext = (EditText)findViewById(R.id.PWDeditText);
+
+        Log.i(TAG,"SSID : " + ssidEdittext.getText().toString());
+        Log.i(TAG,"SSID : " + pwdEdittext.getText().toString());
+
+        mAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, android.R.id.text1);
+        ((ListView) findViewById(R.id.search_lv)).setAdapter(mAdapter);
+        ((ListView) findViewById(R.id.search_lv)).setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                Log.i(TAG,"listview clicked");
+                Log.i(TAG,"test : " + mAdapter.getItem(position));
+                for(int j = 0; j < searchedDevices.size() ; j ++) {
+                    Log.i(TAG, "searchDevice :" + searchedDevices.get(j).getName());
+                    if(mAdapter.getItem(position).contains(searchedDevices.get(j).getName())){
+                        connectThread = new ConnectThread(searchedDevices.get(j));
+                        connectThread.start();
+                    }
+
+                }
+            }
+        });
 
         BluetoothManager manager = (BluetoothManager) this.getSystemService(Context.BLUETOOTH_SERVICE);
         if (manager == null) {
@@ -193,28 +212,18 @@ public class MainActivity extends AppCompatActivity {
                                              if (mBluetoothAdapter.isDiscovering()) {
                                                  mBluetoothAdapter.cancelDiscovery();
                                              }
-                                             bondDevices = mBluetoothAdapter.getBondedDevices();
+                                             /*bondDevices = mBluetoothAdapter.getBondedDevices();
 
                                              if (bondDevices.size() > 0) {
                                                  // There are paired devices. Get the name and address of each paired device.
                                                  for (BluetoothDevice device : bondDevices) {
                                                      String deviceName = device.getName();
                                                      String deviceHardwareAddress = device.getAddress(); // MAC address
-                                                     if(deviceName.contains("rasp")) {
-                                                         ParcelUuid uuids[] = device.getUuids();
-                                                         Log.i(TAG, "uuids :" + Arrays.toString(uuids));
-                                                         Log.i(TAG, "deviceName : " + deviceName);
-                                                         connectThread = new ConnectThread(device);
-                                                         connectThread.start();
-                                                     }
-
                                                  }
                                              }else {
                                                  Log.i(TAG, "no Bond devices" );
-                                             }
-
-
-                                             //mBluetoothAdapter.startDiscovery();
+                                             }*/
+                                             mBluetoothAdapter.startDiscovery();
                                              enable_discovery();
                                          }
                                      });
@@ -290,15 +299,34 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 Log.i(TAG, "deviceName :" + deviceName);
-                if(deviceName.contains("rasp")){
+                /*if(deviceName.contains("rasp")){
                     //mbtDevice = device;
                     ParcelUuid uuids[] =device.getUuids();
-
                     pairDevice(device);
                     Log.i(TAG, "uuids :" + Arrays.toString(uuids));
                     connectThread = new ConnectThread(device);
                     connectThread.start();
 
+                }*/
+                for(int i = 0; i < mAdapter.getCount(); i++){
+                    Log.i(TAG,"AAAmAdapter content : " + mAdapter.getItem(i));
+                    if(mAdapter.getItem(i).contains(device.getName())) {
+
+                        Log.i(TAG,"device name already listed");
+                        return;
+                    }
+                }
+                if (device != null) {
+                    //Adapter added to ListView.
+                    searchedDevices.add(device);
+                    mAdapter.add("Device name:" + device.getName() + "\n Device address:" + device.getAddress());
+                    mAdapter.notifyDataSetChanged();
+                    for(int i = 0; i < mAdapter.getCount(); i++){
+                        Log.i(TAG,"mAdapter content : " + mAdapter.getItem(i));
+                    }
+                    for(int j = 0; j < searchedDevices.size() ; j ++) {
+                        Log.i(TAG, "searchDevice :" + searchedDevices.get(j).getName());
+                    }
                 }
 
             }else if(BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)){
@@ -368,7 +396,8 @@ public class MainActivity extends AppCompatActivity {
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            send("hello");
+            String senddata = "SSID:" + ssidEdittext.getText().toString() + "," + "PWD:" + pwdEdittext.getText().toString();
+            send(senddata);
             // The connection attempt succeeded. Perform work associated with
             // the connection in a separate thread.
             //manageMyConnectedSocket(mmSocket);
@@ -499,7 +528,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         Log.i(TAG,"onResume");
         //mBluetoothAdapter.startDiscovery();
-
+        mAdapter.clear();
+        searchedDevices.clear();
         super.onResume();
     }
 
