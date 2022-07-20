@@ -19,6 +19,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
 import android.view.View;
@@ -27,15 +28,20 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.ListAdapter;
 import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.ToggleButton;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public class MainActivity extends AppCompatActivity {
@@ -44,21 +50,18 @@ public class MainActivity extends AppCompatActivity {
     BluetoothAdapter mBluetoothAdapter;
     BluetoothLeScanner bluetoothlescanner;
     //private final Map<String, BluetoothDevice> devices = new HashMap<>();
-    //String deviceaddress;
-    BluetoothGatt mBluetoothGatt;
+
     public Button searchBtn;//搜尋藍芽裝置
     public ToggleButton openBtn;//啟動藍芽裝置
 
     List<BluetoothDevice> searchedDevices= new ArrayList<BluetoothDevice>();
-
-    //private static final UUID MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-    //private static final UUID MY_UUID = UUID.fromString("0000111e-0000-1000-8000-00805f9b34fb"); //HFP hands free profile
     private static final UUID MY_UUID = UUID.fromString("00000001-0000-1000-8000-00805F9B34FB");
-    private BluetoothSocket mmSocket;
-    private BluetoothDevice mmDevice;
+
     ConnectThread connectThread;
-    //TextView peripheralTextView;
-    private ArrayAdapter<String> mAdapter;
+
+    //private ListAdapter mAdapter;
+    private ArrayAdapter mAdapter;
+    private List<String> devices_info;
     EditText ssidEdittext;
     EditText pwdEdittext;
     private final static int REQUEST_ENABLE_BT = 1;
@@ -69,8 +72,10 @@ public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CONNECT = 1001;
     private InputStream is = null;
     private OutputStream os = null;
-    ServeThread serveThread = null;
-    UUID uuid;
+    TextView Status_tv;
+    private static final int Status_Update = 1;
+    private static final int DeviceInfo_Update = 2;
+
     @RequiresApi(api = Build.VERSION_CODES.M)
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -153,10 +158,9 @@ public class MainActivity extends AppCompatActivity {
         ssidEdittext = (EditText)findViewById(R.id.SSIDeditTextText);
         pwdEdittext = (EditText)findViewById(R.id.PWDeditText);
 
-        Log.i(TAG,"SSID : " + ssidEdittext.getText().toString());
-        Log.i(TAG,"SSID : " + pwdEdittext.getText().toString());
+        devices_info = new ArrayList<>();
 
-        mAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, android.R.id.text1);
+        mAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, android.R.id.text1, devices_info);
         ((ListView) findViewById(R.id.search_lv)).setAdapter(mAdapter);
         ((ListView) findViewById(R.id.search_lv)).setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -165,11 +169,13 @@ public class MainActivity extends AppCompatActivity {
                 Log.i(TAG,"test : " + mAdapter.getItem(position));
                 for(int j = 0; j < searchedDevices.size() ; j ++) {
                     Log.i(TAG, "searchDevice :" + searchedDevices.get(j).getName());
-                    if(mAdapter.getItem(position).contains(searchedDevices.get(j).getName())){
+                    Log.i(TAG, mAdapter.getItem(position).toString());
+
+
+                    if(devices_info.get(position).contains(searchedDevices.get(j).getName())){
                         connectThread = new ConnectThread(searchedDevices.get(j));
                         connectThread.start();
                     }
-
                 }
             }
         });
@@ -189,10 +195,24 @@ public class MainActivity extends AppCompatActivity {
             //Next, judge in the onActivityResult callback
         }
         Log.i(TAG, "mBluetoothAdapter name : " + mBluetoothAdapter.getName());
+
+        Set<BluetoothDevice> pairedDevices = BluetoothAdapter.getDefaultAdapter().getBondedDevices();
+        if (pairedDevices.size() > 0) {
+            for (BluetoothDevice d: pairedDevices) {
+                String deviceName = d.getName();
+                String macAddress = d.getAddress();
+                Log.i(TAG, "paired device: " + deviceName + " at " + macAddress);
+                // do what you need/want this these list items
+                searchedDevices.add(d);
+                devices_info.add("Device name:" + d.getName() + "\n Status:disconnected");
+
+            }
+        }
+
         IntentFilter intent = new IntentFilter();
         intent.addAction(BluetoothDevice.ACTION_FOUND);// 用BroadcastReceiver來取得搜尋結果
-        intent.addAction(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED); //每當掃描模式變化的時候，應用程式可以為通過ACTION_SCAN_MODE_CHANGED值來監聽全域性的訊息通知。比如，當裝置停止被搜尋以後，該訊息可以被系統通知給應用程式。
-        intent.addAction(BluetoothAdapter.ACTION_STATE_CHANGED); //每當藍芽模組被開啟或者關閉，應用程式可以為通過ACTION_STATE_CHANGED值來監聽全域性的訊息通知。
+        intent.addAction(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED);
+        intent.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         intent.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
         intent.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
         registerReceiver(searchReceiver, intent);
@@ -212,17 +232,7 @@ public class MainActivity extends AppCompatActivity {
                                              if (mBluetoothAdapter.isDiscovering()) {
                                                  mBluetoothAdapter.cancelDiscovery();
                                              }
-                                             /*bondDevices = mBluetoothAdapter.getBondedDevices();
 
-                                             if (bondDevices.size() > 0) {
-                                                 // There are paired devices. Get the name and address of each paired device.
-                                                 for (BluetoothDevice device : bondDevices) {
-                                                     String deviceName = device.getName();
-                                                     String deviceHardwareAddress = device.getAddress(); // MAC address
-                                                 }
-                                             }else {
-                                                 Log.i(TAG, "no Bond devices" );
-                                             }*/
                                              mBluetoothAdapter.startDiscovery();
                                              enable_discovery();
                                          }
@@ -248,11 +258,11 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        //mBluetoothAdapter.startDiscovery();
-        //enable_discovery();
-        //serveThread = new ServeThread();
-        //serveThread.start();
 
+        Status_tv = (TextView) findViewById(R.id.status_textView);
+        Status_tv.setText("Status: Disconnect");
+        //devices_info.set(3, "TEST") ;
+        //mAdapter.notifyDataSetChanged();
     }
 
     private void enable_discovery() {
@@ -283,11 +293,45 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private final Handler mHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            switch (msg.what) {
+                case Status_Update:
+                    Status_tv.setText("Status: " + (String) msg.obj);
+                    //mAdapter.getItem(2).replace("disconnected", "connected");
+                    //mAdapter.notifyDataSetChanged();
+                    break;
+                case DeviceInfo_Update:
+                    String info = msg.obj.toString();
+                    Log.i(TAG,"DeviceInfo_Update");
+                    Log.i(TAG,"info :" + info);
+
+                    String d_name = info.split(",")[0].split(":")[1].trim();
+                    String d_status = info.split(",")[1].split(":")[1].trim();
+                    Log.i(TAG,"d_name : " + d_name);
+                    Log.i(TAG,"d_name : " + d_name.length());
+                    Log.i(TAG,"devices_info.size() : " + devices_info.size());
+                    for (int i = 0; i < devices_info.size() ; i ++){
+                        Log.i(TAG,"devices_info.get(i) : " + devices_info.get(i));
+                        if (devices_info.get(i).contains(d_name)){
+                            Log.i(TAG,"bingo i = " + i );
+                            devices_info.set(i, "Device name:" + d_name + "\n Status:" + d_status);
+                            mAdapter.notifyDataSetChanged();
+
+                        }
+                    }
+                default:
+                    break;
+            }
+        }
+    };
+
     // Create a BroadcastReceiver for ACTION_FOUND.
     private final BroadcastReceiver searchReceiver = new BroadcastReceiver() {
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-
             if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                 // Discovery has found a device. Get the BluetoothDevice
                 // object and its info from the Intent.
@@ -299,19 +343,17 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 Log.i(TAG, "deviceName :" + deviceName);
-                /*if(deviceName.contains("rasp")){
-                    //mbtDevice = device;
-                    ParcelUuid uuids[] =device.getUuids();
-                    pairDevice(device);
-                    Log.i(TAG, "uuids :" + Arrays.toString(uuids));
-                    connectThread = new ConnectThread(device);
-                    connectThread.start();
 
-                }*/
-                for(int i = 0; i < mAdapter.getCount(); i++){
+                /*for(int i = 0; i < mAdapter.getCount(); i++){
                     Log.i(TAG,"AAAmAdapter content : " + mAdapter.getItem(i));
                     if(mAdapter.getItem(i).contains(device.getName())) {
 
+                        Log.i(TAG,"device name already listed");
+                        return;
+                    }
+                }*/
+                for (int i = 0; i < searchedDevices.size() ; i ++){
+                    if (searchedDevices.get(i).getName().contains(device.getName())){
                         Log.i(TAG,"device name already listed");
                         return;
                     }
@@ -319,8 +361,8 @@ public class MainActivity extends AppCompatActivity {
                 if (device != null) {
                     //Adapter added to ListView.
                     searchedDevices.add(device);
-                    mAdapter.add("Device name:" + device.getName() + "\n Device address:" + device.getAddress());
-                    mAdapter.notifyDataSetChanged();
+                    //mAdapter.add("Device name:" + device.getName() + "\n Status:disconnected");
+                    //mAdapter.notifyDataSetChanged();
                     for(int i = 0; i < mAdapter.getCount(); i++){
                         Log.i(TAG,"mAdapter content : " + mAdapter.getItem(i));
                     }
@@ -369,12 +411,10 @@ public class MainActivity extends AppCompatActivity {
         public void run() {
             // Cancel discovery because it otherwise slows down the connection.
             mBluetoothAdapter.cancelDiscovery();
-
             try {
                 // Connect to the remote device through the socket. This call blocks
                 // until it succeeds or throws an exception.
                 mmSocket.connect();
-
             } catch (IOException connectException) {
                 // Unable to connect; close the socket and return.
                 Log.i(TAG,"connect fail");
@@ -385,7 +425,24 @@ public class MainActivity extends AppCompatActivity {
                 }
                 return;
             }
+
+            Message msg = new Message();
+            msg.what = Status_Update;
+            msg.obj = mmDevice.getName() + " BT connected";
+            mHandler.sendMessage(msg);
+
+            Message msg1 = new Message();
+            msg1.what = DeviceInfo_Update;
+
+            msg1.obj = "Device:" + mmDevice.getName() + ",Status:connected";
+            mHandler.sendMessage(msg1);
+
+
             Log.i(TAG,"CONNECT OK!");
+
+            ReadThread readThread = new ReadThread(mmSocket);
+            readThread.start();
+
             try {
                 is = mmSocket.getInputStream();
             } catch (IOException e) {
@@ -396,8 +453,12 @@ public class MainActivity extends AppCompatActivity {
             } catch (IOException e) {
                 e.printStackTrace();
             }
+            String tmp_ssid = ssidEdittext.getText().toString().replace("\\s", "");
+            String tmp_pwd = pwdEdittext.getText().toString().replace("\\s", "");
             String senddata = "SSID:" + ssidEdittext.getText().toString() + "," + "PWD:" + pwdEdittext.getText().toString();
+            Log.i(TAG,"senddata : " + senddata);
             send(senddata);
+
             // The connection attempt succeeded. Perform work associated with
             // the connection in a separate thread.
             //manageMyConnectedSocket(mmSocket);
@@ -451,47 +512,6 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    public class ServeThread extends Thread {
-
-        private BluetoothServerSocket serverSocket;
-
-        private BluetoothSocket serveSocket = null;
-        int which = 1;
-
-        public ServeThread() {
-            try {
-
-                serverSocket = mBluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord("name",
-                        UUID.fromString("0000111e-0000-1000-8000-00805f9b34fb"));
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-        @Override
-        public void run() {
-            // TODO Auto-generated method stub
-            try {
-                Log.d(TAG, "ServeThread create");
-                serveSocket = serverSocket.accept();
-                serverSocket.close();
-                which = 0;
-                is = serveSocket.getInputStream();
-                os = serveSocket.getOutputStream();
-
-                ReadThread readThread = new ReadThread(serveSocket);
-                readThread.start();
-
-                send("從serve端發送成功");
-
-            } catch (IOException e) {
-                // TODO Auto-generated catch block
-                Log.d("ServeThread","create error");
-                e.printStackTrace();
-            }
-
-
-        }
-    }
 
     public class ReadThread extends Thread{
 
@@ -510,10 +530,7 @@ public class MainActivity extends AppCompatActivity {
                         String tmp;
                         count = is.read(buffer);
                         tmp = new String(buffer, 0, count, "utf-8");
-                        Message message = new Message();
-                        message.arg1 = 1;
-                        message.obj = tmp;
-                        //handler.sendMessage(message);
+                        Log.i(TAG,"read : " + tmp);
                     } catch (IOException e) {
                         e.printStackTrace();
                         Log.d(TAG, "ReadThread IOE");
@@ -528,8 +545,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         Log.i(TAG,"onResume");
         //mBluetoothAdapter.startDiscovery();
-        mAdapter.clear();
-        searchedDevices.clear();
+        //mAdapter.clear();
+        //searchedDevices.clear();
         super.onResume();
     }
 
