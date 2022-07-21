@@ -102,6 +102,7 @@ public class MainActivity extends AppCompatActivity {
                     Log.i(TAG, mAdapter.getItem(position).toString());
 
                     if(devices_info.get(position).contains(searchedDevices.get(j).getName())){
+                        Log.i(TAG, "find match device");
                         if(devices_info.get(position).contains("disconnected")) {
                             if (connectThread == null) {
                                 connectThread = new ConnectThread(searchedDevices.get(j));

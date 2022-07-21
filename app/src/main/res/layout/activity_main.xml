@@ -26,7 +26,28 @@
         app:layout_constraintStart_toEndOf="@+id/search_btn"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <ListView
+    <ScrollView
+        android:id="@+id/scrollView1"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="32dp"
+        android:fillViewport="true"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/status_textView">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <ListView
+                android:id="@+id/search_lv"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"></ListView>
+        </LinearLayout>
+    </ScrollView>
+
+    <!--<ListView
         android:id="@+id/search_lv"
         android:layout_width="409dp"
         android:layout_height="649dp"
@@ -37,7 +58,7 @@
 
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/status_textView"
-        tools:ignore="DuplicateIds" />
+        tools:ignore="DuplicateIds" />-->
 
     <TextView
         android:id="@+id/status_textView"
