@@ -22,6 +22,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
@@ -31,6 +32,7 @@ import android.widget.EditText;
 import android.widget.ListAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.widget.ToggleButton;
 
 import java.io.IOException;
@@ -52,7 +54,9 @@ public class MainActivity extends AppCompatActivity {
     //private final Map<String, BluetoothDevice> devices = new HashMap<>();
 
     public Button searchBtn;//搜尋藍芽裝置
-    public Button sendWifiInfoBtn;//搜尋藍芽裝置
+    public Button sendWifiInfoBtn;//傳送wifi 資訊
+    public Button setSSIDDefaultBtn;//設定SSID為開機預設
+    public Button setHotspotDefaultBtn;//設定SSID為開機預設
     public ToggleButton openBtn;//啟動藍芽裝置
 
     List<BluetoothDevice> searchedDevices= new ArrayList<BluetoothDevice>();
@@ -76,6 +80,7 @@ public class MainActivity extends AppCompatActivity {
     TextView Status_tv;
     private static final int Status_Update = 1;
     private static final int DeviceInfo_Update = 2;
+    private static final int Toast_Show = 3;
 
     @RequiresApi(api = Build.VERSION_CODES.M)
     @Override
@@ -107,6 +112,13 @@ public class MainActivity extends AppCompatActivity {
                             if (connectThread == null) {
                                 connectThread = new ConnectThread(searchedDevices.get(j));
                                 connectThread.start();
+                            } else {
+                                if (connectThread.isAlive() == false){
+                                    connectThread.cancel();
+                                    connectThread = null;
+                                    connectThread = new ConnectThread(searchedDevices.get(j));
+                                    connectThread.start();
+                                }
                             }
                         }else {
                             if (connectThread != null) {
@@ -194,6 +206,30 @@ public class MainActivity extends AppCompatActivity {
         });
         sendWifiInfoBtn.setEnabled(false);
 
+        setSSIDDefaultBtn = (Button)findViewById(R.id.btn_SSID_default);
+        setSSIDDefaultBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // TODO Auto-generated method stub
+                String senddata = "SetDefault:" + ssidEdittext.getText().toString();
+                Log.i(TAG,"senddata : " + senddata);
+                send(senddata);
+            }
+        });
+        setSSIDDefaultBtn.setEnabled(false);
+
+        setHotspotDefaultBtn = (Button)findViewById(R.id.btn_Hotspot_Default);
+        setHotspotDefaultBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // TODO Auto-generated method stub
+                String senddata = "SetDefault:" + "Hotspot";
+                Log.i(TAG,"senddata : " + senddata);
+                send(senddata);
+            }
+        });
+        setHotspotDefaultBtn.setEnabled(false);
+
         openBtn.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 if (isChecked) {
@@ -262,8 +298,12 @@ public class MainActivity extends AppCompatActivity {
                     //mAdapter.notifyDataSetChanged();
                     if (status_info.contains("disconnected")) {
                         sendWifiInfoBtn.setEnabled(false);
+                        setSSIDDefaultBtn.setEnabled(false);
+                        setHotspotDefaultBtn.setEnabled(false);
                     }else{
                         sendWifiInfoBtn.setEnabled(true);
+                        setSSIDDefaultBtn.setEnabled(true);
+                        setHotspotDefaultBtn.setEnabled(true);
                     }
                     break;
                 case DeviceInfo_Update:
@@ -284,6 +324,12 @@ public class MainActivity extends AppCompatActivity {
                             mAdapter.notifyDataSetChanged();
                         }
                     }
+                    break;
+                case Toast_Show:
+                    String data = (String)msg.obj;
+                    Toast toast = Toast.makeText(getApplicationContext(),data,Toast.LENGTH_LONG);
+                    toast.setGravity(Gravity.TOP,0,0);
+                    toast.show();
                     break;
                 default:
                     break;
@@ -421,11 +467,11 @@ public class MainActivity extends AppCompatActivity {
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            String tmp_ssid = ssidEdittext.getText().toString().replace("\\s", "");
+            /*String tmp_ssid = ssidEdittext.getText().toString().replace("\\s", "");
             String tmp_pwd = pwdEdittext.getText().toString().replace("\\s", "");
             String senddata = "SSID:" + ssidEdittext.getText().toString() + "," + "PWD:" + pwdEdittext.getText().toString();
             Log.i(TAG,"senddata : " + senddata);
-            send(senddata);
+            send(senddata);*/
 
             // The connection attempt succeeded. Perform work associated with
             // the connection in a separate thread.
@@ -493,6 +539,19 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    private void handle_read_message(String read_data){
+        if (read_data.contains("Fail")){
+            Message msg = new Message();
+            msg.what = Toast_Show;
+            msg.obj = read_data;
+            mHandler.sendMessage(msg);
+        }else {
+            Message msg = new Message();
+            msg.what = Toast_Show;
+            msg.obj = read_data;
+            mHandler.sendMessage(msg);
+        }
+    }
 
     public class ReadThread extends Thread{
 
@@ -512,6 +571,8 @@ public class MainActivity extends AppCompatActivity {
                         count = is.read(buffer);
                         tmp = new String(buffer, 0, count, "utf-8");
                         Log.i(TAG,"read : " + tmp);
+                        handle_read_message(tmp);
+
                     } catch (IOException e) {
                         e.printStackTrace();
                         Log.d(TAG, "ReadThread IOE");
